@@ -120,49 +120,83 @@ with tab1:
 
 # --- TAB 2: BULK UPLOAD ---
 with tab2:
-    # ... (Bulk upload logic with added validation)
     st.subheader("Carga Masiva desde Archivo")
-    # ... (Instructions)
     st.info("""
         **Instrucciones:**
         1. Sube un archivo CSV o Excel (.xlsx).
         2. El archivo debe contener las siguientes columnas obligatorias:
-           - `saldo`, `id_ejercicio`, `descripcion`, `rubro`, `pda_gral`, `pda`, `nombre_centro_costo`, `nombre_usuario`
-        3. Si tu usuario no es administrador, todos los registros deben pertenecer a tu centro de costo.
+           - `saldo`, `id_ejercicio`, `descripcion`, `rubro`, `pda_gral`, `pda`, `id_ctro_cto`, `nombre_usuario`
+        3. Si tu usuario no es administrador, todos los registros deben pertenecer a tu centro de costo (usando el ID correcto).
     """)
     uploaded_file = st.file_uploader("Elige un archivo CSV o Excel", type=["csv", "xlsx"], key="bulk_uploader")
     if uploaded_file:
         try:
             df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
+            
+            # Normalize column names: strip whitespace and convert to lower case
+            df.columns = df.columns.str.strip().str.lower()
+
+            # Handle common typo: id_cetro_cto -> id_ctro_cto
+            if 'id_cetro_cto' in df.columns:
+                df.rename(columns={'id_cetro_cto': 'id_ctro_cto'}, inplace=True)
+
             st.write("Previsualización de los datos a cargar:")
             st.dataframe(df.head())
 
             if st.button("Iniciar Carga Masiva"):
                 records_to_insert = []
                 errors = []
+                
+                # This set is already filtered based on user permissions from the top of the script
+                valid_ctro_cto_ids = {item['id'] for item in ctros_cto_data}
+
                 with st.spinner("Procesando archivo..."):
-                    # Validation for non-superusers
-                    if not is_superuser:
-                        user_ctro_cto_nombre = [k for k, v in ctros_cto_map.items() if v == user_ctro_cto_id][0]
-                        if not all(df['nombre_centro_costo'] == user_ctro_cto_nombre):
-                            errors.append("Error de Permiso: El archivo contiene registros de centros de costo que no te corresponden.")
+                    # --- VALIDATION ---
+                    required_cols = {'saldo', 'id_ejercicio', 'descripcion', 'rubro', 'pda_gral', 'pda', 'id_ctro_cto', 'nombre_usuario'}
+                    if not required_cols.issubset(df.columns):
+                        missing_cols = required_cols - set(df.columns)
+                        errors.append(f"Error: Faltan las siguientes columnas obligatorias: {', '.join(missing_cols)}")
                     
                     if not errors:
+                        # Convert id_ctro_cto to a numeric type, coercing errors to NaN.
+                        df['id_ctro_cto'] = pd.to_numeric(df['id_ctro_cto'], errors='coerce')
+
+                        # --- DATA PROCESSING ---
                         for index, row in df.iterrows():
                             try:
-                                # ... (Lookups are the same)
+                                # Validate and get id_ctro_cto
+                                id_ctro_cto = row['id_ctro_cto']
+                                if pd.isna(id_ctro_cto):
+                                    raise ValueError("El 'id_ctro_cto' está vacío o no es un número válido.")
+                                
+                                id_ctro_cto = int(id_ctro_cto)
+
+                                if id_ctro_cto not in valid_ctro_cto_ids:
+                                    raise ValueError(f"El id_ctro_cto '{id_ctro_cto}' no es válido o no tienes permiso para usarlo.")
+
+                                # Lookups for partida and user
                                 match_df = partidas_df[(partidas_df['rubro'] == row['rubro']) & (partidas_df['pda_gral'] == row['pda_gral']) & (partidas_df['pda'] == row['pda'])]
-                                if len(match_df) != 1: raise ValueError(f"No se encontró una partida única (halladas {len(match_df)})")
+                                if len(match_df) != 1:
+                                    raise ValueError(f"No se encontró una partida única para la combinación dada (halladas {len(match_df)}).")
+                                
                                 id_partida = int(match_df.iloc[0]['id'])
-                                id_ctro_cto = int(ctros_cto_map[row['nombre_centro_costo']])
                                 id_user = int(users_map[row['nombre_usuario']])
+                                
                                 record = {
-                                    "id_ctro_cto": id_ctro_cto, "id_partida": id_partida, "saldo": row['saldo'],
-                                    "id_user": id_user, "id_ejercicio": int(row['id_ejercicio']), "descripcion": row['descripcion']
+                                    "id_ctro_cto": id_ctro_cto,
+                                    "id_partida": id_partida,
+                                    "saldo": row['saldo'],
+                                    "id_user": id_user,
+                                    "id_ejercicio": int(row['id_ejercicio']),
+                                    "descripcion": row['descripcion']
                                 }
                                 records_to_insert.append(record)
-                            except Exception as e:
+                            except KeyError as e:
+                                errors.append(f"Fila {index + 2}: Falta la columna requerida o el nombre es incorrecto: {e}")
+                            except ValueError as e:
                                 errors.append(f"Fila {index + 2}: {e}")
+                            except Exception as e:
+                                errors.append(f"Fila {index + 2}: Error inesperado - {e}")
                 
                 if errors:
                     st.error("Se encontraron errores en el archivo y no se pudo cargar:")

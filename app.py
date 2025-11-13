@@ -12,7 +12,7 @@ supabase = init_connection()
 
 # --- PAGE CONFIG ---
 st.set_page_config(
-    page_title="App de Carga de Datos",
+    page_title="Inicio",
     page_icon="👋",
     layout="centered"
 )
@@ -75,7 +75,7 @@ else:
         st.rerun()
 
     # --- MAIN PAGE CONTENT ---
-    st.title("Página Principal")
+    st.title("Inicio")
     st.write("---")
     st.header("Navegación")
     st.write("Usa la barra lateral a la izquierda para navegar a las diferentes secciones de la aplicación:")
