@@ -3,8 +3,8 @@ import pandas as pd
 from supabase import create_client, Client
 
 # --- PAGE CONFIG ---
-st.set_page_config(page_title="Carga de Datos", page_icon="📤")
-st.title("📤 Carga de Datos")
+st.set_page_config(page_title="Carga Ejecucion", page_icon="📤")
+st.title("📤 Carga de Ejecucion")
 
 # --- AUTHENTICATION ---
 if "user" not in st.session_state:
@@ -58,7 +58,7 @@ with tab1:
     # ... (The manual upload form logic remains largely the same, but the Centro de Costo dropdown will be filtered)
     st.subheader("Formulario de Carga Manual")
     saldo_manual = st.number_input("Saldo", format="%.2f", key="saldo_manual")
-    id_ejercicio_manual = st.number_input("ID Ejercicio", min_value=0, step=1, key="id_ejercicio_manual")
+    id_ejercicio_manual = st.date_input("Fecha Ejercicio", key="ejercicio_manual_date")
     descripcion_manual = st.text_area("Descripción", key="descripcion_manual")
 
     st.divider()
@@ -91,7 +91,7 @@ with tab1:
     selected_user = st.selectbox("Usuario", options=user_options, index=default_user_index, disabled=True)
 
     st.divider()
-    if st.button("Guardar Movimiento"):
+    if st.button("Guardar Ejecución"):
         # ... (Submission logic remains the same)
         if not all([selected_rubro, selected_pda, selected_pda_gral, selected_ctro_cto, selected_user]):
             st.error("Asegúrate de seleccionar valores para todos los menús desplegables.")
@@ -107,14 +107,14 @@ with tab1:
                         id_user = int(users_map[selected_user])
                         new_movimiento = {
                             "id_ctro_cto": id_ctro_cto, "id_partida": id_partida, "saldo": saldo_manual,
-                            "id_user": id_user, "id_ejercicio": int(id_ejercicio_manual), "descripcion": descripcion_manual
+                            "id_user": id_user, "id_ejercicio": str(id_ejercicio_manual), "descripcion": descripcion_manual
                         }
-                        response = supabase.table("tbl_movimientos").insert(new_movimiento).execute()
+                        response = supabase.table("tbl_ejecucion").insert(new_movimiento).execute()
                         if hasattr(response, 'error') and response.error:
                             st.error(f"Error al guardar: {response.error.message}")
                         else:
-                            st.success("¡Movimiento guardado con éxito!")
-                            st.toast("¡Movimiento guardado con éxito!")
+                            st.success("¡Ejecución guardada con éxito!")
+                            st.toast("¡Ejecución guardada con éxito!")
                     except Exception as e:
                         st.error(f"Ocurrió un error inesperado: {e}")
 
@@ -125,7 +125,7 @@ with tab2:
         **Instrucciones:**
         1. Sube un archivo CSV o Excel (.xlsx).
         2. El archivo debe contener las siguientes columnas obligatorias:
-           - `saldo`, `id_ejercicio`, `descripcion`, `rubro`, `pda_gral`, `pda`, `id_ctro_cto`, `nombre_usuario`
+           - `saldo`, `id_ejercicio` (en formato YYYY-MM-DD), `descripcion`, `rubro`, `pda_gral`, `pda`, `id_ctro_cto`, `nombre_usuario`
         3. Si tu usuario no es administrador, todos los registros deben pertenecer a tu centro de costo (usando el ID correcto).
     """)
     uploaded_file = st.file_uploader("Elige un archivo CSV o Excel", type=["csv", "xlsx"], key="bulk_uploader")
@@ -158,8 +158,12 @@ with tab2:
                         errors.append(f"Error: Faltan las siguientes columnas obligatorias: {', '.join(missing_cols)}")
                     
                     if not errors:
+                        # --- DATA PREPARATION ---
                         # Convert id_ctro_cto to a numeric type, coercing errors to NaN.
                         df['id_ctro_cto'] = pd.to_numeric(df['id_ctro_cto'], errors='coerce')
+                        # Convert id_ejercicio to datetime, coercing errors to NaT.
+                        df['id_ejercicio'] = pd.to_datetime(df['id_ejercicio'], errors='coerce')
+
 
                         # --- DATA PROCESSING ---
                         for index, row in df.iterrows():
@@ -174,6 +178,10 @@ with tab2:
                                 if id_ctro_cto not in valid_ctro_cto_ids:
                                     raise ValueError(f"El id_ctro_cto '{id_ctro_cto}' no es válido o no tienes permiso para usarlo.")
 
+                                # Validate id_ejercicio
+                                if pd.isna(row['id_ejercicio']):
+                                    raise ValueError("La fecha en 'id_ejercicio' está vacía o no tiene un formato válido (use YYYY-MM-DD).")
+
                                 # Lookups for partida and user
                                 match_df = partidas_df[(partidas_df['rubro'] == row['rubro']) & (partidas_df['pda_gral'] == row['pda_gral']) & (partidas_df['pda'] == row['pda'])]
                                 if len(match_df) != 1:
@@ -187,7 +195,7 @@ with tab2:
                                     "id_partida": id_partida,
                                     "saldo": row['saldo'],
                                     "id_user": id_user,
-                                    "id_ejercicio": int(row['id_ejercicio']),
+                                    "id_ejercicio": str(row['id_ejercicio'].date()),
                                     "descripcion": row['descripcion']
                                 }
                                 records_to_insert.append(record)
@@ -206,7 +214,7 @@ with tab2:
                 else:
                     with st.spinner(f"Cargando {len(records_to_insert)} registros..."):
                         try:
-                            response = supabase.table("tbl_movimientos").insert(records_to_insert).execute()
+                            response = supabase.table("tbl_ejecucion").insert(records_to_insert).execute()
                             if hasattr(response, 'error') and response.error:
                                 st.error(f"Error en la carga masiva: {response.error.message}")
                             else:
